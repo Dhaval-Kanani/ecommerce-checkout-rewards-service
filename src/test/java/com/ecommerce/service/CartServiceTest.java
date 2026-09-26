@@ -12,13 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Wired with real repositories rather than mocks. Stock enforcement lives in
- * the interaction between the cart, the inventory service and the seeded
- * catalogue, so mocking the repositories would assert nothing about it.
- */
 class CartServiceTest {
-
     private static final String LAPTOP = "ITEM001";
     private static final int LAPTOP_STOCK = 50;
 

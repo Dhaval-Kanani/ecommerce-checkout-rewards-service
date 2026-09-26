@@ -16,7 +16,6 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class CartService {
-
     private final CartRepository cartRepository;
     private final ItemRepository itemRepository;
     private final InventoryService inventoryService;
@@ -31,13 +30,6 @@ public class CartService {
                 .orElseThrow(() -> new ResourceNotFoundException("Cart not found with id: " + cartId));
     }
 
-    /**
-     * Adds units to a cart, creating the cart when no id is supplied.
-     *
-     * <p>The stock check here is a courtesy so the caller learns early that a
-     * quantity is impossible. It reserves nothing. Stock can be taken by another
-     * checkout between this call and ours, so checkout re-checks authoritatively.
-     */
     public Cart addItemToCart(String cartId, String itemId, int quantity) {
         if (quantity < 1) {
             throw new IllegalArgumentException("Quantity must be at least 1");
@@ -50,8 +42,6 @@ public class CartService {
                 ? createCart().getCartId()
                 : getCart(cartId).getCartId();
 
-        // Mutating through the repository serialises concurrent writes to the
-        // same cart. Mutating the Cart object directly would race on its list.
         return cartRepository.mutate(targetCartId, cart -> {
             Optional<CartItem> existing = cart.getItems().stream()
                     .filter(line -> line.getItemId().equals(itemId))

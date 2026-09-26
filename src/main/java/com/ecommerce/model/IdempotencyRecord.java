@@ -5,17 +5,6 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/**
- * What the service remembers about one idempotency key.
- *
- * <p>{@code fingerprint} is a digest of the request the key first arrived with.
- * Reusing a key for a different cart or coupon is a client bug, and comparing
- * fingerprints turns it into a clear error instead of silently replaying an
- * unrelated order.
- *
- * <p>Mutated only inside {@link
- * com.ecommerce.repository.IdempotencyRepository}, under the map's per-key lock.
- */
 @Data
 @AllArgsConstructor
 public class IdempotencyRecord {

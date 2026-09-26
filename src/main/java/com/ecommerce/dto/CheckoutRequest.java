@@ -11,6 +11,6 @@ import lombok.NoArgsConstructor;
 public class CheckoutRequest {
     @NotBlank(message = "Cart ID is required")
     private String cartId;
-    
+
     private String discountCode;
 }

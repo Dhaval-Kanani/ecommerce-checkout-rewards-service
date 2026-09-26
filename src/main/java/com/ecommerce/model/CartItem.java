@@ -14,7 +14,7 @@ public class CartItem {
     private String name;
     private BigDecimal price;
     private int quantity;
-    
+
     public BigDecimal getSubtotal() {
         return price.multiply(BigDecimal.valueOf(quantity));
     }

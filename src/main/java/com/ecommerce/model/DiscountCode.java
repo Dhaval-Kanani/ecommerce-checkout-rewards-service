@@ -7,14 +7,6 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-/**
- * A single-use percentage coupon.
- *
- * <p>{@code status} must only be changed through {@link
- * com.ecommerce.repository.DiscountCodeRepository}, which performs each
- * transition atomically. Setting it directly reintroduces the double-redeem
- * race this state machine exists to prevent.
- */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

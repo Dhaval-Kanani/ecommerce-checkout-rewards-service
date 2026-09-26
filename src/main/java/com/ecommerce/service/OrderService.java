@@ -34,7 +34,6 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class OrderService {
-
     private static final BigDecimal DISCOUNT_PERCENTAGE = new BigDecimal("10");
     private static final BigDecimal HUNDRED = new BigDecimal("100");
 
@@ -48,20 +47,6 @@ public class OrderService {
     @Value("${app.discount.nth-order:3}")
     private int nthOrder;
 
-    /**
-     * Places an order for a cart, at most once per idempotency key.
-     *
-     * <p>A retry carrying a key that already succeeded returns that same order
-     * instead of placing a second one. A retry of a key whose attempt failed is
-     * allowed to proceed, because the failure committed nothing. A key whose
-     * attempt is still running is rejected rather than queued, so a caller never
-     * blocks waiting on another request.
-     *
-     * @param idempotencyKey caller-supplied key identifying this checkout attempt
-     * @throws IdempotencyKeyConflictException if the key was first used with a
-     *                                         different cart or coupon
-     * @throws CheckoutInProgressException     if an attempt for the key is running
-     */
     public CheckoutResult checkout(String cartId, String discountCodeStr, String idempotencyKey) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new IllegalArgumentException("Idempotency-Key must not be blank");
@@ -74,13 +59,11 @@ public class OrderService {
             return replay(existing.get(), idempotencyKey, fingerprint);
         }
 
-        // We inserted the record, so we are the one request allowed to place it.
         try {
             Order order = placeOrder(cartId, discountCodeStr);
             idempotencyRepository.complete(idempotencyKey, order.getOrderId());
             return new CheckoutResult(order, false);
         } catch (RuntimeException e) {
-            // Nothing was committed, so release the key and let the client retry.
             idempotencyRepository.abandon(idempotencyKey);
             throw e;
         }
@@ -101,15 +84,7 @@ public class OrderService {
         return new CheckoutResult(order, true);
     }
 
-    /**
-     * The order-placing body, run at most once per idempotency key.
-     *
-     * <p>Claims the cart, then stock, then the coupon. Anything that throws before
-     * the commit point releases all three, in reverse order.
-     */
     private Order placeOrder(String cartId, String discountCodeStr) {
-        // Claim the cart. Of two concurrent checkouts of one cart only one gets it,
-        // so a single cart can never become two orders.
         Cart cart = cartRepository.claim(cartId).orElseThrow(() -> new ResourceNotFoundException(
                 "Cart not found, or already checked out: " + cartId));
 
@@ -124,8 +99,7 @@ public class OrderService {
 
             lines = cart.lineQuantities();
             inventoryService.reserve(lines);
-            // Set only after reserve returns. Restoring stock we never took would
-            // invent inventory out of nothing.
+
             stockReserved = true;
 
             BigDecimal subtotal = cart.getTotal();
@@ -133,7 +107,6 @@ public class OrderService {
             String appliedDiscountCode = null;
 
             if (discountCodeStr != null && !discountCodeStr.isEmpty()) {
-                // Claims the coupon. Exactly one concurrent checkout wins.
                 DiscountCode coupon = discountCodeRepository.reserve(discountCodeStr);
                 reservedCoupon = discountCodeStr;
                 discountAmount = subtotal.multiply(coupon.getDiscountPercentage())
@@ -165,7 +138,6 @@ public class OrderService {
             return order;
         } finally {
             if (!committed) {
-                // Undo in the reverse order of acquisition.
                 if (savedOrderId != null) {
                     orderRepository.deleteById(savedOrderId);
                 }
@@ -175,16 +147,12 @@ public class OrderService {
                 if (stockReserved) {
                     inventoryService.restore(lines);
                 }
-                // Hand the cart back so the customer can fix the problem and retry.
+
                 cartRepository.save(cart);
             }
         }
     }
 
-    /**
-     * Mints the milestone coupon. Runs after the order is committed, and a failure
-     * here must not fail a paid order, so it is logged rather than propagated.
-     */
     private void mintMilestoneCoupon(int orderNumber) {
         if (orderNumber % nthOrder != 0) {
             return;
@@ -198,10 +166,6 @@ public class OrderService {
         }
     }
 
-    /**
-     * Digest of the request a key was first used with. Length-prefixed so that no
-     * two different cart-and-coupon pairs can canonicalise to the same string.
-     */
     private String fingerprint(String cartId, String discountCodeStr) {
         String cart = cartId == null ? "" : cartId;
         String code = discountCodeStr == null ? "" : discountCodeStr;

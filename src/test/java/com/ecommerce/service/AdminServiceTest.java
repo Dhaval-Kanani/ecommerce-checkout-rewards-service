@@ -17,9 +17,8 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class AdminServiceTest {
-
-    private static final String LAPTOP = "ITEM001"; // 999.99
-    private static final String MOUSE = "ITEM002";  // 29.99
+    private static final String LAPTOP = "ITEM001";
+    private static final String MOUSE = "ITEM002";
     private static final int NTH_ORDER = 3;
 
     private CartService cartService;

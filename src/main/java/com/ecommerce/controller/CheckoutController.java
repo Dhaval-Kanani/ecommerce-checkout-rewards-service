@@ -19,24 +19,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/checkout")
 @RequiredArgsConstructor
 public class CheckoutController {
-
     private final OrderService orderService;
 
-    /**
-     * Places an order.
-     *
-     * <p>The {@code Idempotency-Key} header is required. Without it a client that
-     * retries a timed-out request cannot be distinguished from one deliberately
-     * placing a second order, which is exactly the double-charge this guards.
-     *
-     * <p>Answers 201 when this request placed the order, and 200 when it replays
-     * an order an earlier request with the same key already placed.
-     */
     @PostMapping
     public ResponseEntity<ApiResponse<Order>> checkout(
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody CheckoutRequest request) {
-
         CheckoutResult result = orderService.checkout(
                 request.getCartId(), request.getDiscountCode(), idempotencyKey);
 

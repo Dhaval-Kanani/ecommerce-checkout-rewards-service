@@ -31,10 +31,6 @@ public class Cart {
                 .sum();
     }
 
-    /**
-     * Units required per item id, collapsed so one item cannot appear twice.
-     * This is the shape the inventory reservation needs.
-     */
     public Map<String, Integer> lineQuantities() {
         Map<String, Integer> lines = new LinkedHashMap<>();
         for (CartItem item : items) {

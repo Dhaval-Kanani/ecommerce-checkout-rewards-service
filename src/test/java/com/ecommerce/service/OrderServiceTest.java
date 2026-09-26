@@ -28,9 +28,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Checkout behaviour against real repositories, including stock effects. */
 class OrderServiceTest {
-
     private static final String LAPTOP = "ITEM001";
     private static final String MOUSE = "ITEM002";
     private static final int LAPTOP_STOCK = 50;
@@ -62,7 +60,6 @@ class OrderServiceTest {
         return cartService.addItemToCart(null, itemId, quantity).getCartId();
     }
 
-    /** A fresh idempotency key, as a well-behaved client would send per attempt. */
     private String newKey() {
         return UUID.randomUUID().toString();
     }
@@ -116,7 +113,7 @@ class OrderServiceTest {
     @DisplayName("checkout fails when stock ran out after the cart was filled")
     void checkoutRejectsCartBeyondStock() {
         String cartId = cartWith(LAPTOP, 5);
-        // Someone else takes the units between add-to-cart and checkout.
+
         inventoryService.reserve(Map.of(LAPTOP, LAPTOP_STOCK - 2));
 
         assertThrows(InsufficientStockException.class, () -> checkout(cartId, null));
@@ -235,11 +232,9 @@ class OrderServiceTest {
         assertEquals(CouponStatus.ISSUED,
                 discountCodeRepository.findByCode(code).orElseThrow().getStatus());
 
-        // And the released coupon really is usable again.
         Order retried = checkout(cartWith(LAPTOP, 1), code);
         assertEquals(code, retried.getDiscountCode());
     }
-
 
     @Test
     @DisplayName("a cart is handed back when checkout fails, so it can be retried")
@@ -253,7 +248,6 @@ class OrderServiceTest {
         assertEquals(1, recovered.getItems().size());
         assertEquals(3, recovered.getItems().get(0).getQuantity());
 
-        // The retry without the bad coupon succeeds.
         assertNotNull(checkout(cartId, null).getOrderId());
     }
 
@@ -266,7 +260,6 @@ class OrderServiceTest {
         assertThrows(ResourceNotFoundException.class, () -> checkout(cartId, null));
         assertEquals(LAPTOP_STOCK - 2, inventoryService.availableStock(LAPTOP));
     }
-
 
     @Test
     @DisplayName("retrying with the same key returns the first order rather than placing a second")
@@ -322,7 +315,6 @@ class OrderServiceTest {
         assertThrows(InvalidDiscountCodeException.class,
                 () -> orderService.checkout(cartId, "NOT-A-REAL-CODE", key));
 
-        // The failed attempt consumed nothing, including the key itself.
         assertEquals(0, idempotencyRepository.size());
         CheckoutResult retry = orderService.checkout(cartId, null, key);
         assertFalse(retry.isReplayed());
@@ -334,7 +326,7 @@ class OrderServiceTest {
     void inFlightKeyIsRejected() {
         String cartId = cartWith(LAPTOP, 1);
         String key = newKey();
-        // Simulate an attempt that has taken the key and not yet finished.
+
         idempotencyRepository.begin(key, fingerprintOf(cartId, null));
 
         assertThrows(CheckoutInProgressException.class,
@@ -350,12 +342,10 @@ class OrderServiceTest {
         assertThrows(IllegalArgumentException.class, () -> orderService.checkout(cartId, null, null));
     }
 
-    /** Mirrors OrderService.fingerprint so the in-flight test can seed a matching record. */
     private String fingerprintOf(String cartId, String discountCode) {
         return (String) ReflectionTestUtils.invokeMethod(orderService, "fingerprint", cartId, discountCode);
     }
 
-    /** An order store that fails on write, to exercise the compensation path. */
     private OrderRepository explodingOrderRepository() {
         return new OrderRepository() {
             @Override

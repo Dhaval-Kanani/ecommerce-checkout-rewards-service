@@ -15,7 +15,6 @@ import java.util.List;
 @RequestMapping("/api/items")
 @RequiredArgsConstructor
 public class ItemController {
-
     private final InventoryService inventoryService;
 
     @GetMapping

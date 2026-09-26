@@ -34,25 +34,11 @@ import java.util.function.IntFunction;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * The invariants that only break under contention.
- *
- * <p>Two shapes of test are used. Where the contended resource is plural, such as
- * stock, one large burst is enough. Where it is a single object that exactly one
- * caller may claim, such as a cart, a coupon or an idempotency key, the race is
- * repeated over many rounds with the racers aligned on a {@link CyclicBarrier}.
- * A single round can miss a narrow window and pass for the wrong reason; many
- * aligned rounds will not.
- *
- * <p>Every test is time-bounded, so a lock-ordering regression shows up as a
- * failure rather than a suite that hangs.
- */
 class CheckoutConcurrencyTest {
-
-    private static final String LAPTOP = "ITEM001";     // seeded stock 50
-    private static final String MOUSE = "ITEM002";      // seeded stock 100
-    private static final String MONITOR = "ITEM004";    // seeded stock 30
-    private static final String HEADPHONES = "ITEM005"; // seeded stock 60
+    private static final String LAPTOP = "ITEM001";
+    private static final String MOUSE = "ITEM002";
+    private static final String MONITOR = "ITEM004";
+    private static final String HEADPHONES = "ITEM005";
     private static final int LAPTOP_STOCK = 50;
     private static final int MOUSE_STOCK = 100;
     private static final int MONITOR_STOCK = 30;
@@ -83,8 +69,7 @@ class CheckoutConcurrencyTest {
     @DisplayName("twice as many buyers as units sells exactly the units that exist")
     void concurrentCheckoutsNeverOversell() throws Exception {
         int buyers = MONITOR_STOCK * 2;
-        // Carts are filled up front, while stock is still ample, so the contention
-        // under test is at checkout rather than at add-to-cart.
+
         List<String> carts = new ArrayList<>();
         for (int i = 0; i < buyers; i++) {
             carts.add(cartWith(MONITOR, 1));
@@ -145,8 +130,6 @@ class CheckoutConcurrencyTest {
                         .count();
                 assertEquals(1, placed, "round " + round + ": more than one attempt placed an order");
 
-                // Anything that did not place the order either replayed it or was
-                // told the first attempt was still running. Nothing else is correct.
                 long accounted = outcomes.stream()
                         .filter(o -> (o.succeeded() && o.result.isReplayed())
                                 || o.error instanceof CheckoutInProgressException)
@@ -173,8 +156,6 @@ class CheckoutConcurrencyTest {
         ExecutorService pool = Executors.newFixedThreadPool(racers);
         try {
             for (int round = 0; round < rounds; round++) {
-                // Seeded straight into the store, so this test isolates the redemption
-                // race from milestone minting.
                 String code = "RACE-" + round;
                 discountCodeRepository.save(new DiscountCode(code, round, new BigDecimal("10")));
 
@@ -195,8 +176,6 @@ class CheckoutConcurrencyTest {
             pool.shutdownNow();
         }
 
-        // One order per round and not one more. A coupon claimed twice would leave a
-        // second, rolled-back order behind.
         assertEquals(rounds, orderRepository.findAll().size());
         assertEquals(rounds, discountCodeRepository.countByStatus(CouponStatus.REDEEMED));
         assertEquals(0, discountCodeRepository.countByStatus(CouponStatus.RESERVED),
@@ -212,8 +191,6 @@ class CheckoutConcurrencyTest {
         int pairs = 20;
         List<Callable<CheckoutResult>> tasks = new ArrayList<>();
         for (int i = 0; i < pairs; i++) {
-            // One cart lists the laptop first, the other lists it last. Reserving in
-            // cart order would let these two hold each other's item lock.
             String ascending = cartWith(LAPTOP, 1);
             cartService.addItemToCart(ascending, HEADPHONES, 1);
             String descending = cartWith(HEADPHONES, 1);
@@ -237,7 +214,7 @@ class CheckoutConcurrencyTest {
         List<Callable<CheckoutResult>> tasks = new ArrayList<>();
         for (int i = 0; i < each; i++) {
             tasks.add(checkoutTask(cartWith(MOUSE, 2), null));
-            // These fail at coupon reservation, after stock has been reserved.
+
             tasks.add(checkoutTask(cartWith(MOUSE, 2), "NOT-A-REAL-CODE"));
         }
 
@@ -249,8 +226,6 @@ class CheckoutConcurrencyTest {
         assertEquals(MOUSE_STOCK, sold + inventoryService.availableStock(MOUSE),
                 "units were lost or invented");
     }
-
-    // --- helpers ---------------------------------------------------------------
 
     private String cartWith(String itemId, int quantity) {
         return cartService.addItemToCart(null, itemId, quantity).getCartId();
@@ -269,11 +244,6 @@ class CheckoutConcurrencyTest {
                 .sum();
     }
 
-    /**
-     * Runs one round with every racer aligned on a barrier, so all of them enter
-     * checkout at the same instant. The pool must have at least {@code racers}
-     * threads or the barrier cannot be satisfied.
-     */
     private List<Outcome> race(ExecutorService pool, int racers,
                                IntFunction<Callable<CheckoutResult>> factory) throws Exception {
         CyclicBarrier gate = new CyclicBarrier(racers);
@@ -288,7 +258,6 @@ class CheckoutConcurrencyTest {
         return collect(futures);
     }
 
-    /** Fires a large batch at once from a held start gate. */
     private List<Outcome> burst(List<Callable<CheckoutResult>> tasks) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(tasks.size(), 64));
         CountDownLatch gate = new CountDownLatch(1);

@@ -16,7 +16,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class AdminService {
-
     private final OrderRepository orderRepository;
     private final DiscountCodeRepository discountCodeRepository;
 

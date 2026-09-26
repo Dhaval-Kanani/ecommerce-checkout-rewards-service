@@ -16,15 +16,14 @@ import java.util.List;
 @RequestMapping("/api/admin")
 @RequiredArgsConstructor
 public class AdminController {
-    
     private final AdminService adminService;
-    
+
     @GetMapping("/stats")
     public ResponseEntity<ApiResponse<AdminStatsResponse>> getStatistics() {
         AdminStatsResponse stats = adminService.getStatistics();
         return ResponseEntity.ok(ApiResponse.success(stats));
     }
-    
+
     @GetMapping("/discount-codes")
     public ResponseEntity<ApiResponse<List<DiscountCode>>> getDiscountCodes() {
         List<DiscountCode> discountCodes = adminService.getAllDiscountCodes();
