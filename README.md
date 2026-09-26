@@ -1,234 +1,131 @@
-# Uniblox SDE Assignment - E-commerce Store API
+# Ecommerce Checkout and Rewards Service
 
-A Spring Boot backend application for an e-commerce store with shopping cart and checkout functionality, including automatic discount code generation for every nth order.
+A Spring Boot checkout service for carts, inventory, orders and milestone
+coupons. It runs entirely in memory with no external dependencies.
 
-## Features
+The interesting part of this service is not the CRUD. It is what happens when
+requests overlap: not overselling, not charging twice for a retry, and not
+letting two checkouts spend one coupon. Those guarantees, and the tests that
+hold them up, are described in [DECISIONS.md](DECISIONS.md).
 
-- **Shopping Cart Management**
-  - Add items to cart
-  - View cart contents
-  - Remove items from cart
-  
-- **Checkout System**
-  - Process orders
-  - Validate and apply discount codes
-  - Automatic discount code generation for every nth order (configurable)
-  
-- **Admin Dashboard**
-  - View purchase statistics
-  - Track discount codes
-  - Monitor total sales and discounts
+## Running it
 
-## Tech Stack
+Requires Java 17 and Maven 3.6+.
 
-- **Java 17**
-- **Spring Boot 3.2.0**
-- **Maven** - Dependency management
-- **Lombok** - Reduce boilerplate code
-- **JUnit 5** - Unit testing
-- **In-memory storage** - No database required
-
-## Prerequisites
-
-- Java 17 or higher
-- Maven 3.6+
-
-## Setup Instructions
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd Uniblox-SDE-Assignment
-   ```
-
-2. **Build the project**
-   ```bash
-   mvn clean install
-   ```
-
-3. **Run the application**
-   ```bash
-   mvn spring-boot:run
-   ```
-
-The application will start on `http://localhost:8080`
-
-## API Endpoints
-
-### Cart Management
-
-#### Add Item to Cart
-```http
-POST /api/cart/items
-Content-Type: application/json
-
-{
-  "cartId": "string (optional - new cart created if not provided)",
-  "itemId": "string",
-  "quantity": integer
-}
+```bash
+mvn spring-boot:run
 ```
 
-#### Get Cart Details
-```http
-GET /api/cart/{cartId}
-```
-
-#### Remove Item from Cart
-```http
-DELETE /api/cart/{cartId}/items/{itemId}
-```
-
-### Checkout
-
-#### Process Checkout
-```http
-POST /api/checkout
-Content-Type: application/json
-
-{
-  "cartId": "string",
-  "discountCode": "string (optional)"
-}
-```
-
-**Response includes:**
-- Order ID
-- Items purchased
-- Subtotal
-- Discount amount (if applicable)
-- Total amount
-- Generated discount code (if this is the nth order)
-
-### Admin APIs
-
-#### Get Statistics
-```http
-GET /api/admin/stats
-```
-
-**Returns:**
-- Total number of orders
-- Total items purchased
-- Total purchase amount
-- List of discount codes
-- Total discount amount
-
-#### List Discount Codes
-```http
-GET /api/admin/discount-codes
-```
-
-## Configuration
-
-Edit `src/main/resources/application.properties`:
-
-```properties
-# Change the server port
-server.port=8080
-
-# Configure nth order for discount generation (default: 3)
-app.discount.nth-order=3
-```
-
-## Discount Code Logic
-
-- Every **nth order** generates a 10% discount code
-- Discount codes can be used only **once**
-- Discount codes must be used before the next nth order generates a new code
-- Discount applies to the **entire order**, not individual items
-
-## Project Structure
-
-```
-Uniblox-SDE-Assignment/
-├── src/
-│   ├── main/
-│   │   ├── java/com/ecommerce/
-│   │   │   ├── controller/       # REST API controllers
-│   │   │   ├── service/          # Business logic layer
-│   │   │   ├── repository/       # In-memory data store
-│   │   │   ├── model/            # Domain models
-│   │   │   ├── dto/              # Data transfer objects
-│   │   │   ├── exception/        # Custom exceptions
-│   │   │   └── EcommerceStoreApplication.java
-│   │   └── resources/
-│   │       └── application.properties
-│   └── test/
-│       └── java/com/ecommerce/   # Unit tests
-├── pom.xml
-└── README.md
-```
-
-## Running Tests
+Starts on `http://localhost:8080` with five seeded products.
 
 ```bash
 mvn test
 ```
 
-## Sample API Flow
+Runs the full suite, including the concurrency tests.
 
-1. **Add items to cart**
-   ```bash
-   POST /api/cart/items
-   {
-     "itemId": "item1",
-     "quantity": 2
-   }
-   ```
+## Guarantees
 
-2. **Checkout (1st and 2nd orders - no discount code generated)**
-   ```bash
-   POST /api/checkout
-   {
-     "cartId": "cart-id-from-step-1"
-   }
-   ```
+| Guarantee | How it holds |
+|---|---|
+| Stock never goes negative | Every reservation validates and decrements under per-item locks |
+| A multi-item cart reserves all lines or none | All items are locked before any is checked |
+| Concurrent reservations never deadlock | Locks are always taken in ascending item-id order |
+| One cart produces at most one order | Checkout claims the cart with an atomic remove |
+| A retried checkout charges once | Ownership of the idempotency key is decided by `putIfAbsent` |
+| A coupon is redeemed at most once | Status transitions are compare-and-set inside the map's per-key lock |
+| A failed checkout consumes nothing | Order, coupon, stock and cart are all rolled back |
 
-3. **Checkout (3rd order - discount code generated)**
-   ```bash
-   POST /api/checkout
-   {
-     "cartId": "cart-id"
-   }
-   # Response includes a discount code
-   ```
+## API
 
-4. **Use discount code on next order**
-   ```bash
-   POST /api/checkout
-   {
-     "cartId": "cart-id",
-     "discountCode": "DISCOUNT10-ABC123"
-   }
-   ```
+### Items
 
-## Testing with Postman/REST Client
+```http
+GET /api/items
+```
 
-Import the API collection (to be provided) or manually create requests using the endpoints above.
+Returns the catalogue with current stock.
 
-## Assumptions
+### Cart
 
-1. **In-memory storage** - Data is lost when the application restarts
-2. **No user authentication** - All endpoints are publicly accessible
-3. **Pre-populated items** - Sample items are available in the store
-4. **Single currency** - All prices in USD
-5. **No inventory management** - Items are always in stock
+```http
+POST /api/cart/items?cartId={optional}
+Content-Type: application/json
 
-## Future Enhancements
+{ "itemId": "ITEM001", "quantity": 2 }
+```
 
-- Persistent database integration
-- User authentication and authorization
-- Payment gateway integration
-- Email notifications
-- Frontend UI
-- Inventory management
-- Multiple currency support
+Creates a cart when `cartId` is omitted. Rejects a quantity above available
+stock, though it reserves nothing. Checkout is the authoritative check.
 
-## Author
+```http
+GET    /api/cart/{cartId}
+DELETE /api/cart/{cartId}/items/{itemId}
+```
 
-Built for Uniblox SDE Assignment
+### Checkout
 
-## License
+```http
+POST /api/checkout
+Content-Type: application/json
+Idempotency-Key: 7f3a1c2e-...
 
-This project is created for assignment purposes.
+{ "cartId": "...", "discountCode": "DISCOUNT10-AB12CD34" }
+```
+
+`Idempotency-Key` is required. Send a fresh key per checkout attempt and reuse
+that same key when retrying it.
+
+| Status | Meaning |
+|---|---|
+| 201 | This request placed the order |
+| 200 | This key already placed an order; the same order is returned |
+| 409 | An attempt for this key is still running, or the coupon is gone, or stock ran out |
+| 422 | This key was first used for a different cart or coupon |
+| 400 | Missing key, empty cart, or an unknown coupon |
+| 404 | Cart not found, or already checked out |
+
+### Admin
+
+```http
+GET /api/admin/stats
+GET /api/admin/discount-codes
+```
+
+`stats` reports gross revenue, total discount, net revenue, how many orders
+redeemed a coupon, and coupon counts by lifecycle stage. A non-zero `reserved`
+count while the system is idle means a checkout leaked a claim.
+
+## Configuration
+
+`src/main/resources/application.properties`
+
+```properties
+server.port=8080
+app.discount.nth-order=3
+```
+
+Every nth completed order mints a 10% coupon. Any unredeemed coupon stays
+redeemable; minting a new one does not retire the old ones.
+
+## Layout
+
+```
+src/main/java/com/ecommerce/
+  controller/   REST endpoints
+  service/      InventoryService, CartService, OrderService, AdminService
+  repository/   In-memory stores; the atomic primitives live here
+  model/        Domain types and the coupon and idempotency state machines
+  dto/          Request and response shapes
+  exception/    Error types and the global handler
+src/test/java/com/ecommerce/service/
+  CartServiceTest, OrderServiceTest, AdminServiceTest
+  CheckoutConcurrencyTest    the invariants under contention
+```
+
+## Known limits
+
+- In-memory only. Everything is lost on restart.
+- Money is `BigDecimal`, not integer minor units.
+- No authentication. Admin endpoints are open.
+- Single instance. See the scaling notes in [DECISIONS.md](DECISIONS.md).
