@@ -21,6 +21,15 @@ public class OrderRepository {
         return order;
     }
     
+    /**
+     * Removes an order. Used only to compensate a checkout that saved the order
+     * and then failed before its commit point, so a rolled-back attempt cannot
+     * leave a phantom order in the store.
+     */
+    public void deleteById(String orderId) {
+        orders.remove(orderId);
+    }
+
     public Optional<Order> findById(String orderId) {
         return Optional.ofNullable(orders.get(orderId));
     }

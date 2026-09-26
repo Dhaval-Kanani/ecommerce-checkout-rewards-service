@@ -116,6 +116,7 @@ public class OrderService {
         boolean committed = false;
         boolean stockReserved = false;
         String reservedCoupon = null;
+        String savedOrderId = null;
         Map<String, Integer> lines = null;
 
         try {
@@ -153,6 +154,7 @@ public class OrderService {
                     orderNumber
             );
             orderRepository.save(order);
+            savedOrderId = order.getOrderId();
 
             if (reservedCoupon != null) {
                 discountCodeRepository.markRedeemed(reservedCoupon);
@@ -164,6 +166,9 @@ public class OrderService {
         } finally {
             if (!committed) {
                 // Undo in the reverse order of acquisition.
+                if (savedOrderId != null) {
+                    orderRepository.deleteById(savedOrderId);
+                }
                 if (reservedCoupon != null) {
                     discountCodeRepository.release(reservedCoupon);
                 }
