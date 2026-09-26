@@ -1,6 +1,7 @@
 package com.ecommerce.service;
 
 import com.ecommerce.dto.AdminStatsResponse;
+import com.ecommerce.model.CouponStatus;
 import com.ecommerce.model.DiscountCode;
 import com.ecommerce.model.Order;
 import com.ecommerce.repository.DiscountCodeRepository;
@@ -15,43 +16,50 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class AdminService {
-    
+
     private final OrderRepository orderRepository;
     private final DiscountCodeRepository discountCodeRepository;
-    
+
     public AdminStatsResponse getStatistics() {
-        List<Order> allOrders = orderRepository.findAll();
-        
-        int totalOrders = allOrders.size();
-        
-        int totalItemsPurchased = allOrders.stream()
+        List<Order> orders = orderRepository.findAll();
+
+        int totalItemsPurchased = orders.stream()
                 .mapToInt(order -> order.getItems().stream()
-                        .mapToInt(item -> item.getQuantity())
+                        .mapToInt(line -> line.getQuantity())
                         .sum())
                 .sum();
-        
-        BigDecimal totalPurchaseAmount = allOrders.stream()
-                .map(Order::getTotalAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
-        List<String> discountCodes = discountCodeRepository.findAll().stream()
+
+        BigDecimal grossRevenue = sum(orders, Order::getSubtotal);
+        BigDecimal totalDiscount = sum(orders, Order::getDiscountAmount);
+        BigDecimal netRevenue = sum(orders, Order::getTotalAmount);
+
+        int discountedOrders = (int) orders.stream()
+                .filter(order -> order.getDiscountCode() != null)
+                .count();
+
+        List<String> codes = discountCodeRepository.findAll().stream()
                 .map(DiscountCode::getCode)
                 .collect(Collectors.toList());
-        
-        BigDecimal totalDiscountAmount = allOrders.stream()
-                .map(Order::getDiscountAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
+
         return new AdminStatsResponse(
-                totalOrders,
+                orders.size(),
                 totalItemsPurchased,
-                totalPurchaseAmount,
-                discountCodes,
-                totalDiscountAmount
+                grossRevenue,
+                totalDiscount,
+                netRevenue,
+                discountedOrders,
+                discountCodeRepository.countByStatus(CouponStatus.ISSUED),
+                discountCodeRepository.countByStatus(CouponStatus.RESERVED),
+                discountCodeRepository.countByStatus(CouponStatus.REDEEMED),
+                codes
         );
     }
-    
+
     public List<DiscountCode> getAllDiscountCodes() {
         return discountCodeRepository.findAll();
+    }
+
+    private BigDecimal sum(List<Order> orders, java.util.function.Function<Order, BigDecimal> field) {
+        return orders.stream().map(field).reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }
