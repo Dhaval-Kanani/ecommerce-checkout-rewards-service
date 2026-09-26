@@ -28,6 +28,13 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
+    @ExceptionHandler(CouponUnavailableException.class)
+    public ResponseEntity<ApiResponse<Object>> handleCouponUnavailable(CouponUnavailableException ex) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
     @ExceptionHandler(InsufficientStockException.class)
     public ResponseEntity<ApiResponse<Object>> handleInsufficientStock(InsufficientStockException ex) {
         return ResponseEntity

@@ -2,8 +2,10 @@ package com.ecommerce.service;
 
 import com.ecommerce.exception.EmptyCartException;
 import com.ecommerce.exception.InsufficientStockException;
+import com.ecommerce.exception.CouponUnavailableException;
 import com.ecommerce.exception.InvalidDiscountCodeException;
 import com.ecommerce.model.Cart;
+import com.ecommerce.model.CouponStatus;
 import com.ecommerce.model.DiscountCode;
 import com.ecommerce.model.Order;
 import com.ecommerce.repository.CartRepository;
@@ -32,11 +34,12 @@ class OrderServiceTest {
     private OrderService orderService;
     private InventoryService inventoryService;
     private DiscountCodeRepository discountCodeRepository;
+    private CartRepository cartRepository;
 
     @BeforeEach
     void setUp() {
         ItemRepository itemRepository = new ItemRepository();
-        CartRepository cartRepository = new CartRepository();
+        cartRepository = new CartRepository();
         inventoryService = new InventoryService(itemRepository);
         cartService = new CartService(cartRepository, itemRepository, inventoryService);
         discountCodeRepository = new DiscountCodeRepository();
@@ -154,7 +157,72 @@ class OrderServiceTest {
         orderService.checkout(cartWith(LAPTOP, 1), coupon.getCode());
 
         String secondCart = cartWith(LAPTOP, 1);
-        assertThrows(InvalidDiscountCodeException.class,
+        assertThrows(CouponUnavailableException.class,
                 () -> orderService.checkout(secondCart, coupon.getCode()));
+    }
+
+    @Test
+    @DisplayName("a redeemed coupon reaches its terminal status")
+    void redeemedCouponIsTerminal() {
+        for (int i = 0; i < NTH_ORDER; i++) {
+            orderService.checkout(cartWith(MOUSE, 1), null);
+        }
+        DiscountCode coupon = discountCodeRepository.findAll().get(0);
+        assertEquals(CouponStatus.ISSUED, coupon.getStatus());
+
+        orderService.checkout(cartWith(LAPTOP, 1), coupon.getCode());
+
+        assertEquals(CouponStatus.REDEEMED, coupon.getStatus());
+        assertNotNull(coupon.getRedeemedAt());
+    }
+
+    @Test
+    @DisplayName("minting a newer coupon does not strand an older unused one")
+    void olderCouponStaysRedeemableAfterNewerIsMinted() {
+        for (int i = 0; i < NTH_ORDER * 2; i++) {
+            orderService.checkout(cartWith(MOUSE, 1), null);
+        }
+        assertEquals(2, discountCodeRepository.findAll().size());
+        String oldestCode = discountCodeRepository.findAll().get(0).getCode();
+
+        Order order = orderService.checkout(cartWith(LAPTOP, 1), oldestCode);
+
+        assertEquals(oldestCode, order.getDiscountCode());
+        assertEquals(0, new BigDecimal("100.00").compareTo(order.getDiscountAmount()));
+    }
+
+    @Test
+    @DisplayName("a checkout that fails after claiming a coupon releases both coupon and stock")
+    void failureAfterCouponClaimReleasesEverything() {
+        for (int i = 0; i < NTH_ORDER; i++) {
+            orderService.checkout(cartWith(MOUSE, 1), null);
+        }
+        String code = discountCodeRepository.findAll().get(0).getCode();
+        int stockBefore = inventoryService.availableStock(LAPTOP);
+
+        OrderService failing = new OrderService(explodingOrderRepository(), cartRepository,
+                discountCodeRepository, cartService, inventoryService);
+        ReflectionTestUtils.setField(failing, "nthOrder", NTH_ORDER);
+
+        assertThrows(IllegalStateException.class,
+                () -> failing.checkout(cartWith(LAPTOP, 3), code));
+
+        assertEquals(stockBefore, inventoryService.availableStock(LAPTOP));
+        assertEquals(CouponStatus.ISSUED,
+                discountCodeRepository.findByCode(code).orElseThrow().getStatus());
+
+        // And the released coupon really is usable again.
+        Order retried = orderService.checkout(cartWith(LAPTOP, 1), code);
+        assertEquals(code, retried.getDiscountCode());
+    }
+
+    /** An order store that fails on write, to exercise the compensation path. */
+    private OrderRepository explodingOrderRepository() {
+        return new OrderRepository() {
+            @Override
+            public Order save(Order order) {
+                throw new IllegalStateException("order store unavailable");
+            }
+        };
     }
 }
