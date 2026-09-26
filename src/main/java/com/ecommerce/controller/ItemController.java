@@ -2,7 +2,7 @@ package com.ecommerce.controller;
 
 import com.ecommerce.dto.ApiResponse;
 import com.ecommerce.model.Item;
-import com.ecommerce.repository.ItemRepository;
+import com.ecommerce.service.InventoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,12 +15,11 @@ import java.util.List;
 @RequestMapping("/api/items")
 @RequiredArgsConstructor
 public class ItemController {
-    
-    private final ItemRepository itemRepository;
-    
+
+    private final InventoryService inventoryService;
+
     @GetMapping
     public ResponseEntity<ApiResponse<List<Item>>> getAllItems() {
-        List<Item> items = itemRepository.findAll();
-        return ResponseEntity.ok(ApiResponse.success(items));
+        return ResponseEntity.ok(ApiResponse.success(inventoryService.catalogue()));
     }
 }
