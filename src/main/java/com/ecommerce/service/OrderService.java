@@ -1,5 +1,6 @@
 package com.ecommerce.service;
 
+import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.model.Cart;
 import com.ecommerce.model.DiscountCode;
 import com.ecommerce.model.Order;
@@ -44,15 +45,25 @@ public class OrderService {
      * later step does not burn it.
      */
     public Order checkout(String cartId, String discountCodeStr) {
-        Cart cart = cartService.getCart(cartId);
-        cartService.validateCart(cart);
+        // Claim the cart first. Of two concurrent checkouts of the same cart only
+        // one gets it, so a single cart can never become two orders.
+        Cart cart = cartRepository.claim(cartId).orElseThrow(() -> new ResourceNotFoundException(
+                "Cart not found, or already checked out: " + cartId));
 
-        Map<String, Integer> lines = cart.lineQuantities();
         boolean committed = false;
+        boolean stockReserved = false;
         String reservedCoupon = null;
+        Map<String, Integer> lines = null;
 
-        inventoryService.reserve(lines);
         try {
+            cartService.validateCart(cart);
+
+            lines = cart.lineQuantities();
+            inventoryService.reserve(lines);
+            // Set only after reserve returns. Restoring stock we never took would
+            // invent inventory out of nothing.
+            stockReserved = true;
+
             BigDecimal subtotal = cart.getTotal();
             BigDecimal discountAmount = BigDecimal.ZERO;
             String appliedDiscountCode = null;
@@ -83,17 +94,21 @@ public class OrderService {
             if (reservedCoupon != null) {
                 discountCodeRepository.markRedeemed(reservedCoupon);
             }
-            cartRepository.deleteById(cartId);
             committed = true;
 
             mintMilestoneCoupon(orderNumber);
             return order;
         } finally {
             if (!committed) {
+                // Undo in the reverse order of acquisition.
                 if (reservedCoupon != null) {
                     discountCodeRepository.release(reservedCoupon);
                 }
-                inventoryService.restore(lines);
+                if (stockReserved) {
+                    inventoryService.restore(lines);
+                }
+                // Hand the cart back so the customer can fix the problem and retry.
+                cartRepository.save(cart);
             }
         }
     }

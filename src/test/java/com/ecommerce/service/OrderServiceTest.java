@@ -2,6 +2,7 @@ package com.ecommerce.service;
 
 import com.ecommerce.exception.EmptyCartException;
 import com.ecommerce.exception.InsufficientStockException;
+import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.exception.CouponUnavailableException;
 import com.ecommerce.exception.InvalidDiscountCodeException;
 import com.ecommerce.model.Cart;
@@ -98,6 +99,7 @@ class OrderServiceTest {
 
         assertThrows(InsufficientStockException.class, () -> orderService.checkout(cartId, null));
         assertEquals(2, inventoryService.availableStock(LAPTOP));
+        assertNotNull(cartService.getCart(cartId));
     }
 
     @Test
@@ -214,6 +216,33 @@ class OrderServiceTest {
         // And the released coupon really is usable again.
         Order retried = orderService.checkout(cartWith(LAPTOP, 1), code);
         assertEquals(code, retried.getDiscountCode());
+    }
+
+
+    @Test
+    @DisplayName("a cart is handed back when checkout fails, so it can be retried")
+    void cartSurvivesFailedCheckout() {
+        String cartId = cartWith(LAPTOP, 3);
+
+        assertThrows(InvalidDiscountCodeException.class,
+                () -> orderService.checkout(cartId, "NOT-A-REAL-CODE"));
+
+        Cart recovered = cartService.getCart(cartId);
+        assertEquals(1, recovered.getItems().size());
+        assertEquals(3, recovered.getItems().get(0).getQuantity());
+
+        // The retry without the bad coupon succeeds.
+        assertNotNull(orderService.checkout(cartId, null).getOrderId());
+    }
+
+    @Test
+    @DisplayName("one cart cannot be checked out twice")
+    void sameCartCannotBeCheckedOutTwice() {
+        String cartId = cartWith(LAPTOP, 2);
+        orderService.checkout(cartId, null);
+
+        assertThrows(ResourceNotFoundException.class, () -> orderService.checkout(cartId, null));
+        assertEquals(LAPTOP_STOCK - 2, inventoryService.availableStock(LAPTOP));
     }
 
     /** An order store that fails on write, to exercise the compensation path. */
