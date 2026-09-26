@@ -1,11 +1,17 @@
 package com.ecommerce.service;
 
+import com.ecommerce.dto.CheckoutResult;
+import com.ecommerce.exception.CheckoutInProgressException;
+import com.ecommerce.exception.IdempotencyKeyConflictException;
 import com.ecommerce.exception.ResourceNotFoundException;
 import com.ecommerce.model.Cart;
 import com.ecommerce.model.DiscountCode;
+import com.ecommerce.model.IdempotencyRecord;
+import com.ecommerce.model.IdempotencyStatus;
 import com.ecommerce.model.Order;
 import com.ecommerce.repository.CartRepository;
 import com.ecommerce.repository.DiscountCodeRepository;
+import com.ecommerce.repository.IdempotencyRepository;
 import com.ecommerce.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,9 +20,14 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -30,6 +41,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final CartRepository cartRepository;
     private final DiscountCodeRepository discountCodeRepository;
+    private final IdempotencyRepository idempotencyRepository;
     private final CartService cartService;
     private final InventoryService inventoryService;
 
@@ -37,16 +49,67 @@ public class OrderService {
     private int nthOrder;
 
     /**
-     * Turns a cart into an order.
+     * Places an order for a cart, at most once per idempotency key.
      *
-     * <p>Every contended resource is claimed before the order is built and
-     * released again if anything afterwards throws. The coupon in particular is
-     * only marked redeemed once the order exists, so a checkout that fails on a
-     * later step does not burn it.
+     * <p>A retry carrying a key that already succeeded returns that same order
+     * instead of placing a second one. A retry of a key whose attempt failed is
+     * allowed to proceed, because the failure committed nothing. A key whose
+     * attempt is still running is rejected rather than queued, so a caller never
+     * blocks waiting on another request.
+     *
+     * @param idempotencyKey caller-supplied key identifying this checkout attempt
+     * @throws IdempotencyKeyConflictException if the key was first used with a
+     *                                         different cart or coupon
+     * @throws CheckoutInProgressException     if an attempt for the key is running
      */
-    public Order checkout(String cartId, String discountCodeStr) {
-        // Claim the cart first. Of two concurrent checkouts of the same cart only
-        // one gets it, so a single cart can never become two orders.
+    public CheckoutResult checkout(String cartId, String discountCodeStr, String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException("Idempotency-Key must not be blank");
+        }
+
+        String fingerprint = fingerprint(cartId, discountCodeStr);
+        Optional<IdempotencyRecord> existing = idempotencyRepository.begin(idempotencyKey, fingerprint);
+
+        if (existing.isPresent()) {
+            return replay(existing.get(), idempotencyKey, fingerprint);
+        }
+
+        // We inserted the record, so we are the one request allowed to place it.
+        try {
+            Order order = placeOrder(cartId, discountCodeStr);
+            idempotencyRepository.complete(idempotencyKey, order.getOrderId());
+            return new CheckoutResult(order, false);
+        } catch (RuntimeException e) {
+            // Nothing was committed, so release the key and let the client retry.
+            idempotencyRepository.abandon(idempotencyKey);
+            throw e;
+        }
+    }
+
+    private CheckoutResult replay(IdempotencyRecord record, String idempotencyKey, String fingerprint) {
+        if (!record.getFingerprint().equals(fingerprint)) {
+            throw new IdempotencyKeyConflictException("Idempotency-Key " + idempotencyKey
+                    + " was already used for a different checkout request");
+        }
+        if (record.getStatus() == IdempotencyStatus.IN_PROGRESS) {
+            throw new CheckoutInProgressException("A checkout for Idempotency-Key " + idempotencyKey
+                    + " is still in progress. Retry shortly.");
+        }
+        Order order = orderRepository.findById(record.getOrderId())
+                .orElseThrow(() -> new IllegalStateException("Idempotency-Key " + idempotencyKey
+                        + " references missing order " + record.getOrderId()));
+        return new CheckoutResult(order, true);
+    }
+
+    /**
+     * The order-placing body, run at most once per idempotency key.
+     *
+     * <p>Claims the cart, then stock, then the coupon. Anything that throws before
+     * the commit point releases all three, in reverse order.
+     */
+    private Order placeOrder(String cartId, String discountCodeStr) {
+        // Claim the cart. Of two concurrent checkouts of one cart only one gets it,
+        // so a single cart can never become two orders.
         Cart cart = cartRepository.claim(cartId).orElseThrow(() -> new ResourceNotFoundException(
                 "Cart not found, or already checked out: " + cartId));
 
@@ -127,6 +190,22 @@ public class OrderService {
             discountCodeRepository.save(new DiscountCode(code, orderNumber, DISCOUNT_PERCENTAGE));
         } catch (RuntimeException e) {
             log.error("Failed to mint milestone coupon for order number {}", orderNumber, e);
+        }
+    }
+
+    /**
+     * Digest of the request a key was first used with. Length-prefixed so that no
+     * two different cart-and-coupon pairs can canonicalise to the same string.
+     */
+    private String fingerprint(String cartId, String discountCodeStr) {
+        String cart = cartId == null ? "" : cartId;
+        String code = discountCodeStr == null ? "" : discountCodeStr;
+        String canonical = cart.length() + ":" + cart + "/" + code.length() + ":" + code;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(canonical.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
         }
     }
 }
